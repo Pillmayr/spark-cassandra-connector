@@ -2,6 +2,7 @@ package com.datastax.spark.connector.rdd
 
 import java.util
 
+import com.datastax.spark.connector.SparkCassandraITSpecBase
 import com.datastax.spark.connector.cql.CassandraConnector
 import com.datastax.spark.connector.embedded._
 import com.datastax.spark.connector.japi.CassandraJavaUtil
@@ -14,12 +15,11 @@ import scala.collection.JavaConversions._
 
 case class SimpleClass(value: Integer)
 
-class CassandraJavaPairRDDSpec extends FlatSpec with Matchers with BeforeAndAfter with BeforeAndAfterAll
-with ShouldMatchers with SharedEmbeddedCassandra with SparkTemplate {
+class CassandraJavaPairRDDSpec extends SparkCassandraITSpecBase with BeforeAndAfter with ShouldMatchers {
 
-  useCassandraConfig("cassandra-default.yaml.template")
+  useCassandraConfig(Seq("cassandra-default.yaml.template"))
 
-  val conn = CassandraConnector(Set(EmbeddedCassandra.cassandraHost))
+  val conn = CassandraConnector(Set(EmbeddedCassandra.getHost(0)))
 
   conn.withSessionDo { session =>
     session.execute("DROP KEYSPACE IF EXISTS java_api_test")

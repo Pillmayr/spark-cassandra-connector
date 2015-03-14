@@ -2,13 +2,13 @@ package com.datastax.spark.connector.embedded
 
 import java.net.InetAddress
 
+
 /** A utility trait for integration testing.
   * Manages *one* single Cassandra server at a time and enables switching its configuration.
   * This is not thread safe, and test suites must not be run in parallel,
   * because they will "steal" the server.*/
 trait EmbeddedCassandra {
 
-  def cassandraHost = EmbeddedCassandra.cassandraHost
 
   /** Implementation hook. */
   def clearCache(): Unit
@@ -16,48 +16,146 @@ trait EmbeddedCassandra {
   /** Switches the Cassandra server to use the new configuration if the requested configuration is different
     * than the currently used configuration. When the configuration is switched, all the state (including data) of
     * the previously running cassandra cluster is lost.
-    * @param configTemplate name of the cassandra.yaml template resource
+    * @param configTemplates name of the cassandra.yaml template resources
     * @param forceReload if set to true, the server will be reloaded fresh even if the configuration didn't change */
-  def useCassandraConfig(configTemplate: String, forceReload: Boolean = false) {
+  def useCassandraConfig(configTemplates: Seq[String], forceReload: Boolean = false) {
     import EmbeddedCassandra._
+    if (!hosts.isEmpty && configTemplates.size > hosts.size) {
+      throw new IllegalArgumentException("Configuration templates can't be more than the number of specified hosts")
+    }
     if (sys.env.get(HostProperty).isEmpty) {
-      if (currentConfigTemplate != configTemplate || forceReload) {
-        clearCache()
-        cassandra.map(_.destroy())
-        cassandra = Some(new CassandraRunner(configTemplate))
-        currentConfigTemplate = configTemplate
+      clearCache()
+
+      for (i <- configTemplates.indices) {
+        if (configTemplates(i) == null || configTemplates(i).trim.isEmpty) {
+          throw new IllegalArgumentException("Configuration template can't be null or empty")
+        }
+        if (currentConfigTemplates.lift(i) != Option(configTemplates(i)) || forceReload) {
+          cassandras.lift(i).map(_.map(_.destroy()))
+          cassandras = cassandras.patch(i, Seq(Some(new CassandraRunner(configTemplates(i), getProps(i)))), 1)
+          currentConfigTemplates = currentConfigTemplates.patch(i, Seq(configTemplates(i)), 1)
+        }
       }
     }
   }
 }
 
+
 object EmbeddedCassandra {
 
-  val DefaultHost = "127.0.0.1"
+  val HostProperty = "IT_TEST_CASSANDRA_HOSTS"
+  val NativePortProperty = "IT_TEST_CASSANDRA_NATIVE_PORTS"
+  val RpcPortProperty = "IT_TEST_CASSANDRA_RPC_PORTS"
 
-  // TODO change to CASSANDRA_HOST
-  val HostProperty = "IT_TEST_CASSANDRA_HOST"
+  validate
 
-  private[connector] var cassandra: Option[CassandraRunner] = None
+  private def validate() = {
+    val hosts = sys.env.get(HostProperty)
+    if (hosts != None) {
+      val nativePorts = sys.env.get(NativePortProperty)
+      if (nativePorts != None) {
+        val rpcPorts = sys.env.get(RpcPortProperty)
+        if (rpcPorts != None) {
+          val hostSize = hosts.getOrElse("").split(",").size
+          val nativePortSize = nativePorts.getOrElse("").split(",").size
+          if (hostSize != nativePortSize) {
+            throw new RuntimeException("IT_TEST_CASSANDRA_HOSTS must have same size as IT_TEST_CASSANDRA_NATIVE_PORTS")
+          }
+          val rpcPortSize = rpcPorts.getOrElse("").split(",").size
+          if (hostSize != rpcPortSize) {
+            throw new RuntimeException("IT_TEST_CASSANDRA_HOSTS must have same size as IT_TEST_CASSANDRA_RPC_PORTS")
+          }
+        } else {
+          throw new RuntimeException("Missing IT_TEST_CASSANDRA_RPC_PORTS settings in system environment")
+        }
+      } else {
+        throw new RuntimeException("Missing IT_TEST_CASSANDRA_NATIVE_PORTS settings in system environment")
+      }
+    }
+  }
 
-  private[connector] var currentConfigTemplate: String = null
+  val hosts: IndexedSeq[InetAddress] = {
+    sys.env.get(HostProperty) match {
+      case Some(h) => h.split(",").map(host => InetAddress.getByName(host.trim)).toIndexedSeq
+      case None => IndexedSeq()
+    }
+  }
 
-  val cassandraHost = InetAddress.getByName(sys.env.getOrElse(HostProperty, DefaultHost))
+  val nativePorts: IndexedSeq[Int] = {
+    sys.env.get(HostProperty) match {
+      case Some(p) => p.split(",").map(port => port.trim.toInt).toIndexedSeq
+      case None => IndexedSeq()
+    }
+  }
+
+  val rpcPorts: IndexedSeq[Int] = {
+    sys.env.get(HostProperty) match {
+      case Some(p) => p.split(",").map(port => port.trim.toInt).toIndexedSeq
+      case None => IndexedSeq()
+    }
+  }
+
+  private[connector] var cassandras: IndexedSeq[Option[CassandraRunner]] = IndexedSeq(None)
+
+  private[connector] var currentConfigTemplates: IndexedSeq[String] = IndexedSeq("")
+
+  def getProps(index: Integer): Map[String, String] = {
+    if (hosts.isEmpty || index < hosts.size) {
+      val host = if (hosts.isEmpty) "127.0.0.1" else hosts(index).getHostAddress
+      Map("seeds"               -> host,
+        "storage_port"          -> s"700$index",
+        "ssl_storage_port"      -> s"700${index + 1}",
+        "native_transport_port" -> s"904${index + 2}",
+        "rpc_address"           -> host,
+        "rpc_port"              -> s"916$index",
+        "listen_address"        -> host,
+        "cluster_name"          -> s"Test Cluster$index")
+    } else {
+      throw new IllegalArgumentException(s"$index index is overflow the size of ${hosts.size}")
+    }
+  }
+
+  def getHost(index: Integer): InetAddress = {
+    if (hosts.isEmpty) {
+      InetAddress.getByName("127.0.0.1")
+    } else if (index < hosts.size) {
+      hosts(index)
+    } else {
+      throw new RuntimeException(s"$index index is overflow the size of ${hosts.size}")
+    }
+  }
+
+  def getNativePort(index: Integer): Integer = {
+    if (nativePorts.isEmpty) {
+      9042 + index
+    } else if (index < hosts.size) {
+      nativePorts(index)
+    } else {
+      throw new RuntimeException(s"$index index is overflow the size of ${hosts.size}")
+    }
+  }
+
+  def getRpcPort(index: Integer): Integer = {
+    if (nativePorts.isEmpty) {
+      9160 + index
+    } else if (index < hosts.size) {
+      rpcPorts(index)
+    } else {
+      throw new RuntimeException(s"$index index is overflow the size of ${hosts.size}")
+    }
+  }
 
   Runtime.getRuntime.addShutdownHook(new Thread(new Runnable {
-    override def run() = cassandra.map(_.destroy())
+    override def run() = cassandras.map(_.map(_.destroy()))
   }))
-
 }
 
-private[connector] class CassandraRunner(val configTemplate: String) extends Embedded {
+private[connector] class CassandraRunner(val configTemplate: String, props: Map[String, String]) extends Embedded {
 
   import java.io.{File, FileOutputStream, IOException}
   import org.apache.cassandra.io.util.FileUtils
   import com.google.common.io.Files
-  import EmbeddedCassandra._
 
-  final val DefaultNativePort = 9042
   val tempDir = mkdir(new File(Files.createTempDir(), "cassandra-driver-spark"))
   val workDir = mkdir(new File(tempDir, "cassandra"))
   val dataDir = mkdir(new File(workDir, "data"))
@@ -66,7 +164,7 @@ private[connector] class CassandraRunner(val configTemplate: String) extends Emb
   val confDir = mkdir(new File(tempDir, "conf"))
   val confFile = new File(confDir, "cassandra.yaml")
 
-  private val properties = Map("cassandra_dir" -> workDir.toString)
+  private val properties = if(props != null) Map("cassandra_dir" -> workDir.toString) ++ props else Map("cassandra_dir" -> workDir.toString)
   closeAfterUse(ClassLoader.getSystemResourceAsStream(configTemplate)) { input =>
     closeAfterUse(new FileOutputStream(confFile)) { output =>
       copyTextFileWithVariableSubstitution(input, output, properties)
@@ -89,7 +187,8 @@ private[connector] class CassandraRunner(val configTemplate: String) extends Emb
     .inheritIO()
     .start()
 
-  if (!waitForPortOpen(InetAddress.getByName(DefaultHost), DefaultNativePort, 10000))
+  val nativePort =  props.get("native_transport_port").get.toInt
+  if (!waitForPortOpen(InetAddress.getByName(props.get("rpc_address").get), nativePort, 100000))
     throw new IOException("Failed to start Cassandra.")
 
   def destroy() {
@@ -98,7 +197,6 @@ private[connector] class CassandraRunner(val configTemplate: String) extends Emb
     FileUtils.deleteRecursive(tempDir)
     tempDir.delete()
   }
-
 }
 
 

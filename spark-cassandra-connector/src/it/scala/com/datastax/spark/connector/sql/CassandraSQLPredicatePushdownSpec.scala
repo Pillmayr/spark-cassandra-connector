@@ -1,16 +1,23 @@
 package com.datastax.spark.connector.sql
 
+import com.datastax.spark.connector.SparkCassandraITSpecBase
 import com.datastax.spark.connector.cql.CassandraConnector
-import com.datastax.spark.connector.embedded.SparkTemplate
+import com.datastax.spark.connector.embedded.{EmbeddedCassandra, SparkTemplate}
 import com.datastax.spark.connector.testkit.SharedEmbeddedCassandra
+import org.apache.spark.SparkContext
 import org.apache.spark.sql.cassandra.CassandraSQLContext
-import org.scalatest.{Matchers, FlatSpec}
+import org.scalatest.{ConfigMap, Matchers, FlatSpec}
 
-class CassandraSQLPredicatePushdownSpec extends FlatSpec with Matchers with SharedEmbeddedCassandra with SparkTemplate {
-  useCassandraConfig("cassandra-default.yaml.template")
-  val conn = CassandraConnector(Set(cassandraHost))
-  val cc = new CassandraSQLContext(sc)
-  cc.setKeyspace("sql_test")
+class CassandraSQLPredicatePushdownSpec extends SparkCassandraITSpecBase {
+  useCassandraConfig(Seq("cassandra-default.yaml.template"))
+  val conn = CassandraConnector(Set(EmbeddedCassandra.getHost(0)))
+  var cc: CassandraSQLContext = null
+
+  override def beforeAll(configMap: ConfigMap) {
+    sc = new SparkContext(conf)
+    cc = new CassandraSQLContext(sc)
+    cc.setKeyspace("sql_test")
+  }
 
   conn.withSessionDo { session =>
     session.execute("CREATE KEYSPACE IF NOT EXISTS sql_test WITH REPLICATION = { 'class': 'SimpleStrategy', 'replication_factor': 1 }")

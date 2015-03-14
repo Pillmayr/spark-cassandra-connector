@@ -1,9 +1,14 @@
 package org.apache.spark.sql.cassandra
 
-import org.apache.spark.SparkContext
+import com.datastax.spark.connector.rdd.ReadConf
+import com.datastax.spark.connector.writer.WriteConf
+import org.apache.commons.lang.StringUtils
+import org.apache.spark.{SparkConf, SparkContext}
 import org.apache.spark.sql.catalyst.analysis.OverrideCatalog
 import org.apache.spark.sql.catalyst.plans.logical.LogicalPlan
 import org.apache.spark.sql.{Strategy, SQLContext, SchemaRDD}
+
+import collection.mutable
 
 /** Allows to execute SQL queries against Cassandra and access results as
   * [[org.apache.spark.sql.SchemaRDD]] collections.
@@ -36,6 +41,123 @@ class CassandraSQLContext(sc: SparkContext) extends SQLContext(sc) {
 
   @transient
   val conf = sc.getConf
+
+  @transient
+  private val clusterReadConf = mutable.Map[String, ReadConf]()
+  @transient
+  private val keyspaceReadConf = mutable.Map[Seq[String], ReadConf]()
+  @transient
+  private val tableReadConf = mutable.Map[Seq[String], ReadConf]()
+
+  /** Add table level read configuration settings */
+  def addTableReadConf(keyspace: String, table: String, conf: SparkConf, cluster: Option[String]) = {
+    cluster match {
+      case Some(c) => validateClusterName(c)
+                      tableReadConf += Seq(table, keyspace, c) -> ReadConf.fromSparkConf(conf)
+      case _       => tableReadConf += Seq(table, keyspace) -> ReadConf.fromSparkConf(conf)
+    }
+    this
+  }
+
+  /** Add keyspace level read configuration settings */
+  def addKeyspaceLevelReadConf(keyspace: String, conf: SparkConf, cluster: Option[String] = None) = {
+    cluster match {
+      case Some(c) => validateClusterName(c)
+                      keyspaceReadConf += Seq(keyspace, c) -> ReadConf.fromSparkConf(conf)
+      case _       => keyspaceReadConf += Seq(keyspace) -> ReadConf.fromSparkConf(conf)
+    }
+    this
+  }
+
+  /** Add cluster level read configuration settings */
+  def addClusterLevelReadConf(cluster: String, conf: SparkConf) = {
+    validateClusterName(cluster)
+    clusterReadConf += cluster -> ReadConf.fromSparkConf(conf)
+    this
+  }
+
+  /** Get read configuration settings by the order of table level, keyspace level, cluster level, default settings */
+  def getReadConf(keyspace: String, table: String, cluster: Option[String]): ReadConf = {
+    cluster match {
+      case Some(c) => validateClusterName(c)
+                      tableReadConf.get(Seq(table, keyspace, c)).getOrElse(
+                        keyspaceReadConf.get(Seq(keyspace, c)).getOrElse(
+                          clusterReadConf.get(c).getOrElse(ReadConf.fromSparkConf(conf))))
+      case _       => tableReadConf.get(Seq(table, keyspace)).getOrElse(
+                        keyspaceReadConf.get(Seq(keyspace)).getOrElse(ReadConf.fromSparkConf(conf)))
+    }
+  }
+
+  @transient
+  private val clusterWriteConf = mutable.Map[String, WriteConf]()
+  @transient
+  private val keyspaceWriteConf = mutable.Map[Seq[String], WriteConf]()
+  @transient
+  private val tableWriteConf = mutable.Map[Seq[String], WriteConf]()
+
+  /** Add table level write configuration settings */
+  def addTableWriteConf(keyspace: String, table: String, conf: SparkConf, cluster: Option[String]) = {
+    cluster match {
+      case Some(c) => validateClusterName(c)
+                      tableWriteConf += Seq(table, keyspace, c) -> WriteConf.fromSparkConf(conf)
+      case _       => tableWriteConf += Seq(table, keyspace) -> WriteConf.fromSparkConf(conf)
+    }
+    this
+  }
+
+  /** Add keyspace level write configuration settings */
+  def addKeyspaceLevelWriteConf(keyspace: String, conf: SparkConf, cluster: Option[String] = None) = {
+    cluster match {
+      case Some(c) => validateClusterName(c)
+                      keyspaceWriteConf += Seq(keyspace, c) -> WriteConf.fromSparkConf(conf)
+      case _       => keyspaceWriteConf += Seq(keyspace) -> WriteConf.fromSparkConf(conf)
+    }
+    this
+  }
+
+  /** Add cluster level write configuration settings */
+  def addClusterLevelWriteConf(cluster: String, conf: SparkConf) = {
+    validateClusterName(cluster)
+    clusterWriteConf += cluster -> WriteConf.fromSparkConf(conf)
+    this
+  }
+
+  /** Get write configuration settings by the order of table level, keyspace level, cluster level, default settings */
+  def getWriteConf(keyspace: String, table: String, cluster: Option[String]): WriteConf = {
+    cluster match {
+      case Some(c) => validateClusterName(c)
+                      tableWriteConf.get(Seq(table, keyspace, c)).getOrElse(
+                        keyspaceWriteConf.get(Seq(keyspace, c)).getOrElse(
+                          clusterWriteConf.get(c).getOrElse(WriteConf.fromSparkConf(conf))))
+      case _       => tableWriteConf.get(Seq(table, keyspace)).getOrElse(
+                        keyspaceWriteConf.get(Seq(keyspace)).getOrElse(WriteConf.fromSparkConf(conf)))
+    }
+  }
+
+  @transient
+  private val clusterCassandraConnConf = mutable.Map[String, SparkConf]()
+
+  /** Add cluster level write configuration settings */
+  def addClusterLevelCassandraConnConf(cluster: String, conf: SparkConf) = {
+    validateClusterName(cluster)
+    clusterCassandraConnConf += cluster -> conf
+    this
+  }
+
+  /** Get Cassandra connection configuration settings by the order of cluster level, default settings */
+  def getCassandraConnConf(cluster: Option[String]): SparkConf = {
+    cluster match {
+      case Some(c) => validateClusterName(c)
+                      clusterCassandraConnConf.get(c).getOrElse(throw new RuntimeException(s"Missing cluster $c Cassandra connection conf"))
+      case _       => conf
+    }
+  }
+
+  private def validateClusterName(cluster: String) {
+    if (StringUtils.isEmpty(cluster)) {
+      throw new IllegalArgumentException("cluster name can't be null or empty")
+    }
+  }
 
   private var keyspaceName = conf.getOption("spark.cassandra.keyspace")
 
