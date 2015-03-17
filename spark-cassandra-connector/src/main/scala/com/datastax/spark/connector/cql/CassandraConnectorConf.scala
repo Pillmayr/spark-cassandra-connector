@@ -49,7 +49,21 @@ object CassandraConnectorConf extends Logging {
   val CassandraMinReconnectionDelayProperty = "spark.cassandra.connection.reconnection_delay_ms.min"
   val CassandraMaxReconnectionDelayProperty = "spark.cassandra.connection.reconnection_delay_ms.max"
   val CassandraQueryRetryCountProperty = "spark.cassandra.query.retry.count"
-  val CassandraReadTimeoutProperty = "spark.cassandra.read.timeout_ms" 
+  val CassandraReadTimeoutProperty = "spark.cassandra.read.timeout_ms"
+
+  //Whitelist for allowed CassandraConnector environment variables
+  val envVars = Seq(
+    CassandraConnectionHostProperty,
+    CassandraConnectionRpcPortProperty,
+    CassandraConnectionNativePortProperty,
+    CassandraConnectionLocalDCProperty,
+    CassandraConnectionTimeoutProperty,
+    CassandraConnectionKeepAliveProperty,
+    CassandraMinReconnectionDelayProperty,
+    CassandraMaxReconnectionDelayProperty,
+    CassandraQueryRetryCountProperty,
+    CassandraReadTimeoutProperty
+  )
   
   private def resolveHost(hostName: String): Option[InetAddress] = {
     try Some(InetAddress.getByName(hostName))
