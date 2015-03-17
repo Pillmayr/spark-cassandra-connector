@@ -1,8 +1,7 @@
 package com.datastax.spark.connector.rdd
 
-import org.apache.spark.SparkConf
-
 import com.datastax.driver.core.ConsistencyLevel
+import org.apache.spark.SparkConf
 
 /** Read settings for RDD
   *
@@ -23,7 +22,7 @@ object ReadConf {
   val ReadConsistencyLevelProperty = "spark.cassandra.input.consistency.level"
 
   //Whitelist for allowed Read environment variables
-  val envVars = Seq(
+  val Properties = Seq(
     ReadFetchSizeProperty,
     ReadSplitSizeProperty,
     ReadConsistencyLevelProperty

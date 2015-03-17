@@ -1,10 +1,10 @@
 package com.datastax.spark.connector.cql
 
 import java.net.InetAddress
-import scala.util.control.NonFatal
 
-import org.apache.spark.SparkConf
-import org.apache.spark.Logging
+import org.apache.spark.{Logging, SparkConf}
+
+import scala.util.control.NonFatal
 
 /** Stores configuration of a connection to Cassandra.
   * Provides information about cluster nodes, ports and optional credentials for authentication. */
@@ -52,7 +52,7 @@ object CassandraConnectorConf extends Logging {
   val CassandraReadTimeoutProperty = "spark.cassandra.read.timeout_ms"
 
   //Whitelist for allowed CassandraConnector environment variables
-  val envVars = Seq(
+  val Properties = Seq(
     CassandraConnectionHostProperty,
     CassandraConnectionRpcPortProperty,
     CassandraConnectionNativePortProperty,

@@ -58,7 +58,7 @@ object WriteConf {
   val WriteThroughputMiBPS = "spark.cassandra.output.throughput_mb_per_sec"
 
   //Whitelist for allowed Write environment variables
-  val envVars = Seq(
+  val Properties = Seq(
     WriteBatchSizeInBytesProperty,
     WriteConsistencyLevelProperty,
     WriteBatchSizeInRowsProperty,
